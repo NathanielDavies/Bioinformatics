@@ -1,0 +1,7 @@
+# Activating genome assembly with mamba
+
+Mamba activate genome assembly
+
+#run prokka
+
+Prokka --outdir prokkaannotation --prefix salmonella AbyssOutput/Salmonella-8.fa
