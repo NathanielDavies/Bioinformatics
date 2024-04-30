@@ -1,0 +1,4 @@
+locus_tag	ftype	length_bp	gene	EC_number	COG	product
+BIAJFAGN_04768	CDS	1059	recA		COG0468	Protein RecA
+BIAJFAGN_03042	CDS	2634	gyrA	5.6.2.2	COG0188	DNA gyrase subunit A
+BIAJFAGN_00082	CDS	726	rpsB		COG0052	30S ribosomal protein S2

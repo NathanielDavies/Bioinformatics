@@ -1,0 +1,271 @@
+---
+title: "Phyloseq"
+output: pdf_document
+date: "2024-04-18"
+---
+
+#Load required packages
+```{r}
+library(phyloseq)
+library(BiMiCo)
+library(dplyr)
+library(devtools)
+library(MicEco)
+library(ggplot2)
+library(vegan)
+```
+
+# Load taxa and seqtab.nochim
+```{r}
+load("RData/taxa")
+load("RData/seqtab.nochim.RData")
+```
+
+# Impot metatata
+```{r}
+metadata<-read.csv("sample-metadata.csv", header=TRUE, row.names = 1)
+```
+
+
+# create phyloseq object
+```{r}
+#load data first
+phyloseq <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows = FALSE), 
+                     sample_data(metadata),
+                     tax_table(taxa))
+#show file
+phyloseq
+```
+
+# transform sample counts
+```{r}
+#convert from row to abundance
+phyloseq <- transform_sample_counts(phyloseq, function(abund) 1*(abund>0))
+phyloseq
+```
+
+# remove the sequence itself and replace with ASV
+```{r}
+dna <- Biostrings:: DNAStringSet(taxa_names(phyloseq))
+names(dna) <- taxa_names(phyloseq)
+phyloseq <- merge_phyloseq(phyloseq, dna)
+taxa_names(phyloseq) <- paste0("ASV", seq(ntaxa(phyloseq)))
+phyloseq
+```
+
+# remove mitochondria and chloroplast matches. remove all non bacterial sequences
+```{r}
+physeq <- phyloseq %>% subset_taxa( Family!= "Mitochondria" | is.na(Family) &
+                                  Order!= "Chloroplast" | is.na(Order) )
+physeq
+```
+
+# Remove all non bactrial sequences
+```{r}
+physeq<-rm_nonbac(physeq)
+physeq
+```
+
+# Save physeq objects to start
+```{r}
+save(physeq, file="RData/physeq.RData")
+```
+
+# load physeq objects
+```{r}
+load("RData/physeq.RData")
+```
+
+# Plot bar graph based on phylum
+```{r}
+plot_bar(physeq, fill = "Phylum") + geom_bar(aes(color=Phylum, fill=Phylum), stat= "identity", position= "fill")
+```
+
+# Create a barplot of relative abundance
+```{r}
+# convert to relative abundance
+physeq_relabund <- transform_sample_counts(physeq, function(x) x / sum(x))
+
+# bar plot
+plot_bar(physeq_relabund, fill = "Phylum") + geom_bar(aes(color=Phylum, fill=Phylum), stat= "Identity", position= "fill") + facet_wrap(~body.site, scales = "free")
+```
+
+# plot alpha diversity based on body site
+```{r}
+plot_richness(physeq, x="body.site", color= "subject", measures=c("Observed", "Simpson", "Shannon"))
+```
+
+# pLot alpha diversity based on antibiotic usage
+```{r}
+plot_richness(physeq, x="reported.antibiotic.usage", color= "body.site", measures=c("Observed", "Simpson", "Shannon"))
+```
+
+# Plot alpha diversity based on subject
+```{r}
+plot_richness(physeq, x="subject", color= "body.site", measures=c("Observed", "Simpson", "Shannon"))
+```
+# Test for normality
+```{r}
+ alpha <- estimate_richness(physeq, measures = c ("Observed", "Simpson", "Shannon"))
+#creates an object called alpha using estimate richness feature of phyloseq
+
+# Shapiro-wilk
+#making three objects: observed, shannon, simpson
+observed <- shapiro.test(alpha$Observed)
+shannon <- shapiro.test(alpha$Shannon)
+simpson <- shapiro.test(alpha$Simpson)
+
+#print
+print(observed)
+print(shannon)
+print(simpson)
+```
+
+# create data frames for statistical analysis 
+```{r}
+# extract sample information from the physeq oject
+samples <- sample_data(physeq)
+
+#If samples is a phyloseq sample_data object, convert it to a data frame
+if (class(samples) == "sample_data") {
+  samples <- data.frame(sample_data(samples)) 
+}
+
+# add a column to alpha with sample names 
+alpha$sample <- rownames(alpha)
+
+# merge alpha diversity data and sample data 
+alpha <- merge(alpha, samples, by = "sample")
+```
+
+# perform statistics based on subject
+```{r}
+ # perform t/wilcox tests for each biodiversity index
+test_observed <- wilcox.test(Observed ~ subject, data = alpha)
+test_simpson <- wilcox.test(Simpson ~ subject, data = alpha)
+test_shannon <- t.test(Shannon ~ subject, data = alpha)
+#use t test for shannon because it was evenly distributed
+
+# Print the results
+print(test_observed)
+print(test_simpson)
+print(test_shannon)
+```
+
+# perform statistics based on reported.antibiotic.usage
+```{r}
+ # perform t/wilcox tests for each biodiversity index
+test_observed <- wilcox.test(Observed ~ reported.antibiotic.usage, data = alpha)
+test_simpson <- wilcox.test(Simpson ~ reported.antibiotic.usage, data = alpha)
+test_shannon <- t.test(Shannon ~ reported.antibiotic.usage, data = alpha)
+#use t test for shannon bc it was evenly distributed
+
+# Print the results
+print(test_observed)
+print(test_simpson)
+print(test_shannon)
+```
+
+# test for body site
+```{r}
+# 3 or more groups need to do anova test for normally distributed data, if not normally distributed do kruskal wallace test
+
+kruskal.test(Simpson ~ body.site, data=alpha)
+pairwise.wilcox.test(alpha$Simpson, alpha$body.site, p.adjust.method="holm")
+kruskal.test(Observed ~ body.site, data=alpha)
+pairwise.wilcox.test(alpha$Observed, alpha$body.site, p.adjust.method="holm")
+shannonanova <- aov(Shannon ~ body.site, data=alpha)
+summary(shannonanova)
+TukeyHSD(shannonanova)
+
+```
+
+# Remove taxa with relative abundance <0.005%
+```{r}
+minToRelAbun = .00005
+x = taxa_sums(physeq)
+keepTaxa = (x/sum(x)) > minToRelAbun
+physeqprune = prune_taxa(keepTaxa, physeq)
+physeqprune
+```
+
+# Number of shared ASVs body.site (found in 25% or more)
+```{r}
+bodysite=ps_venn(
+  physeqprune,
+  "body.site",
+  fraction = .25,
+  weight = FALSE,
+  #weighting rare taxa
+  relative = TRUE,
+  #relative abundance
+  plot = TRUE
+  #if true, give vinn diagram, if not gives list
+)
+bodysite
+```
+
+# Bray Curtis Calculation
+```{r message=FALSE}
+set.seed(777)
+dist = phyloseq::distance(physeqprune, method= "bray", weighted=TRUE)
+oridination = ordinate(physeqprune, method="NMDS", distance=dist)
+```
+
+# Bray Curtis subject plot
+```{r}
+braysubject=plot_ordination(physeqprune, ordination, color="subject") + 
+  theme_classic() +
+  theme(strip.background = element_blank()) + 
+  stat_ellipse(aes(group=subject))
+braysubject
+```
+
+# Bray Curtis Body Site plot
+```{r}
+braybodysite=plot_ordination(physeqprune, ordination, color="body.site") + 
+  theme_classic() +
+  theme(strip.background = element_blank()) + 
+  stat_ellipse(aes(group=body.site))
+braysubject
+```
+
+# Bray Curtis reported.antibiotic.usage plot
+```{r}
+brayantibiotic.usage=plot_ordination(physeqprune, ordination, color="reported.antibiotic.usage") + 
+  theme_classic() +
+  theme(strip.background = element_blank()) + 
+  stat_ellipse(aes(group=body.site))
+braysubject
+```
+
+# Bray Curtis Subject Statistics
+```{r}
+#pulling data from physeqprune based on subject. Testing whether or not significant difference in communities between subjects
+adonis2(dist ~ sample_data(physeqprune)$subject)
+```
+
+# Bray Curtis Body Site Statisics
+```{r}
+adonis2(dist ~ sample_data(physeqprune)$body.site)
+#need this code because more than 2 things that we are comparing
+ps.disper<-betadisper(dist, sample_data(physeqprune)$body.site)
+permutest(ps.disper, pair=TRUE)
+#look at pairwise comparisons for p values when to compare different sites
+```
+
+# Bray Curtis Reported Antibiotic Usage Statistics
+```{r}
+#pulling data from physeqprune based on subject. Testing whether or not significant difference in antibiotic usage
+adonis2(dist ~ sample_data(physeqprune)$reported.antibiotic.usage)
+```
+
+# Export Image with 300dpi
+```{r}
+ggsave(
+  filename= "Fig1.tiff",
+  plot = braybodysite,
+  width = 200,
+  height = 200,
+  units = 
+)
