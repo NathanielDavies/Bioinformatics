@@ -1,0 +1,179 @@
+#Using QIIME 2
+
+conda activate qiime2-amplicon-2024.2
+
+Conda deactivate
+
+
+#this code imports my files into qiime2 and creates the artifact this takes sequencing reads and compresses them for the next step
+
+qiime tools import \
+  --type EMPSingleEndSequences \
+  --input-path emp-single-end-sequences \
+  --output-path emp-single-end-sequences.qza
+
+
+
+#demultiplex sequencing reads this creates the dmux file (which is compressed sequencing reads) form the previously generated .qza file.
+
+qiime demux emp-single \
+  --i-seqs emp-single-end-sequences.qza \
+  --m-barcodes-file sample-metadata.tsv \
+  --m-barcodes-column barcode-sequence \
+  --o-per-sample-sequences demux.qza \
+  --o-error-correction-details demux-details.qza
+
+
+#this code creates a demux visualization called demux.qzv that can be viewed on the web
+
+qiime demux summarize \
+  --i-data demux.qza \
+  --o-visualization demux.qzv
+
+#visualize demux or any .qzv file on the web
+
+qiime tools view demux.qzv
+
+
+#trim code with DADA2 from 3' end while leaving 5' end alone. This is trimming 0 from 5' and  Change single to paired, add trim forward and truncate reverse if using paired end
+
+qiime dada2 denoise-single \
+  --i-demultiplexed-seqs demux.qza \
+  --p-trim-left 0 \
+  --p-trunc-len 120 \
+  --o-representative-sequences rep-seqs-dada2.qza \
+  --o-table table-dada2.qza \
+  --o-denoising-stats stats-dada2.qza
+
+#trim code with DADA2 from 3' end while leaving 5' end alone. This is trimming 20 from 5' on the forward strand and cutting again at 180. On the reverse, this trims 0 from the 5' end, and cuts at 150 bp.
+## code used for Section report assignment
+
+qiime dada2 denoise-paired \
+  --i-demultiplexed-seqs demux.qza \
+  --p-trim-left-f 20 \
+  --p-trunc-len-f 185 \
+  --p-trim-left-r 0 \
+  --p-trunc-len-r 150 \
+  --o-representative-sequences rep-seqs-dada2.qza \
+  --o-table table-dada2.qza \
+  --o-denoising-stats stats-dada2.qza
+
+#rename files to remove dada2
+
+mv rep-seqs-dada2.qza rep-seqs.qza
+mv table-dada2.qza table.qza
+Mv stats-dada2.qzv stats.qzv
+Mv stats-dada2.qza stats.qza
+
+
+#create visualizations to view the data using the table created with DADA2
+
+qiime feature-table summarize \
+  --i-table table-dada2.qza \
+  --o-visualization qiimetable.qzv \
+  --m-sample-metadata-file metadata.tsv
+qiime feature-table tabulate-seqs \
+  --i-data rep-seqs-dada2.qza \
+  --o-visualization qiimerep-seqs.qzv
+
+#creating phylogenetic tree using the rep-seqs file from DADA2
+
+qiime phylogeny align-to-tree-mafft-fasttree \
+  --i-sequences rep-seqs-dada2.qza \
+  --o-alignment aligned-rep-seqs.qza \
+  --o-masked-alignment masked-aligned-rep-seqs.qza \
+  --o-tree unrooted-tree.qza \
+  --o-rooted-tree rooted-tree.qza
+
+
+#calculate diversity change 1226 (sampling depth) depending on data in qiimetable.qzv
+
+qiime diversity core-metrics-phylogenetic \
+  --i-phylogeny rooted-tree.qza \
+  --i-table table.qza \
+  --p-sampling-depth 1226 \
+  --m-metadata-file metadata.tsv \
+  --output-dir core-metrics-results
+
+#calculating alpha diversity significance
+
+qiime diversity alpha-group-significance \
+  --i-alpha-diversity core-metrics-results/shannon_vector.qza \
+  --m-metadata-file metadata.tsv \
+  --o-visualization core-metrics-results/shannondiversitysignificance.qzv
+
+qiime diversity alpha-group-significance \
+  --i-alpha-diversity core-metrics-results/observed_features_vector.qza \
+  --m-metadata-file metadata.tsv \
+  --o-visualization core-metrics-results/observedfeaturessignificance.qzv
+
+#calculating beta diversity significance for population, sex, and flock
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza \
+  --m-metadata-file metadata.tsv \
+  --m-metadata-column sex \
+  --o-visualization core-metrics-results/unweighted-unifrac-sex-group-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza \
+  --m-metadata-file metadata.tsv \
+  --m-metadata-column population \
+  --o-visualization core-metrics-results/unweighted-unifrac-population-group-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza \
+  --m-metadata-file metadata.tsv \
+  --m-metadata-column flock \
+  --o-visualization core-metrics-results/unweighted-unifrac-flock-group-significance.qzv \
+  --p-pairwise
+
+#generating taxonomy using a standard classifier obtained from the moving pictures tuturial
+
+qiime feature-classifier classify-sklearn \
+  --i-classifier gg-13-8-99-515-806-nb-classifier.qza \
+  --i-reads rep-seqs-dada2.qza \
+  --o-classification taxonomy.qza
+
+qiime metadata tabulate \
+  --m-input-file taxonomy2.qza \
+  --o-visualization taxonomy2.qzv
+
+#creating a bar plot for taxonomy
+
+qiime taxa barplot \
+  --i-table table.qza \
+  --i-taxonomy taxonomy.qza \
+  --m-metadata-file sample-metadata.tsv \
+  --o-visualization taxa-bar-plots.qzv
+
+##filter for gut only--not used in section report only used if trying to filter based on body site location
+
+qiime feature-table filter-samples \
+  --i-table table.qza \
+  --m-metadata-file sample-metadata.tsv \
+  --p-where "[body-site]='gut'" \
+  --o-filtered-table gut-table.qza
+
+##compare species in gut between subjects and finding statistical significance-differential abundance--not used in section report only used if trying to compare species between subjects
+
+qiime composition ancombc \
+  --i-table gut-table.qza \
+  --m-metadata-file sample-metadata.tsv \
+  --p-formula 'subject' \
+  --o-differentials ancombc-subject.qza
+
+qiime composition da-barplot \
+  --i-data ancombc-subject.qza \
+  --p-significance-threshold 0.001 \
+  --o-visualization da-barplot-subject.qzv
+
+#remove mitochondria and chloroplast species from the taxonomy once created, visualize the new data with the "bar plot for taxonomy" code
+
+qiime taxa filter-table \
+  --i-table table.qza \
+  --i-taxonomy taxonomy.qza \
+  --p-exclude mitochondria,chloroplast \
+  --o-filtered-table table.qza
