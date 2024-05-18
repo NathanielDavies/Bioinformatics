@@ -1,0 +1,11 @@
+#Abyss Code
+
+Mamba activate genomeassembly
+
+# abyss on paired end reads kmer 96bp on putative M. Tuberculosis Genome
+
+abyss-pe name=mtuberculosis k=96 B=2G in='Reads1.fastq.gz Reads2.fastq.gz'
+
+#run prokka
+
+Prokka --outdir ProkkaOutput --prefix mtuberculosis AbyssOutput/mtuberculosis-8.fa
